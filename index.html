@@ -12,6 +12,7 @@
 <body>
     <div id="game"></div>
     <script>
+    // --- FIREBASE КОНФИГУРАЦИЯ ---
     const firebaseConfig = {
         apiKey: "AIzaSyBMb2Cf30QffPe3Eo8jJQkRlriMlz7yeHw",
         authDomain: "formacrm-a5ff8.firebaseapp.com",
@@ -23,15 +24,18 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
+    // --- TELEGRAM ---
     const tg = window.Telegram.WebApp;
     tg.expand();
     const userId = tg.initDataUnsafe?.user?.id || "local_player";
     const userName = tg.initDataUnsafe?.user?.first_name || "Сталкер";
 
+    // --- ПЕРЕМЕННЫЕ ИГРЫ ---
     let money = 250, lives = 10, currentWave = 1;
+    let upgrades = { dmg: 1, hp: 1 };
     let selectedTowerType = 'ak', isWaveActive = false;
-    let moneyText, livesText, startBtn, menuGroup, gameGroup;
-    let towers, enemies, bullets, path;
+    let moneyText, livesText, menuGroup, gameGroup, shopGroup, leaderGroup;
+    let towers, enemies, bullets, path, startBtn;
 
     const config = {
         type: Phaser.AUTO,
@@ -44,150 +48,219 @@
     const game = new Phaser.Game(config);
 
     function preload() {
+        // === ВИЗУАЛ (Заменяй ссылки здесь на свои картинки) ===
         this.load.image('ground', 'https://labs.phaser.io/assets/textures/mud.png');
+        
+        // Башни
         this.load.image('tower_ak', 'https://labs.phaser.io/assets/sprites/masked-block.png'); 
         this.load.image('tower_svd', 'https://labs.phaser.io/assets/sprites/column.png'); 
-        this.load.image('enemy_dog', 'https://labs.phaser.io/assets/sprites/clown.png'); 
+        this.load.image('tower_emi', 'https://labs.phaser.io/assets/sprites/crate.png'); // Новая башня
+        
+        // Враги (ВСТАВЬ ССЫЛКИ НА ПСЕВДОСОБАК И КРОВОСОСОВ СЮДА)
+        this.load.image('enemy_dog', 'https://labs.phaser.io/assets/sprites/space-baddie.png'); 
+        this.load.image('enemy_bloodsucker', 'https://labs.phaser.io/assets/sprites/ghost.png'); 
+        this.load.image('enemy_giant', 'https://labs.phaser.io/assets/sprites/mummy.png'); 
+        
+        // Эффекты
         this.load.image('bullet', 'https://labs.phaser.io/assets/sprites/bullets/bullet1.png');
+        this.load.image('particle', 'https://labs.phaser.io/assets/particles/yellow.png');
+
+        // === ЗВУКИ ===
+        this.load.audio('shot', 'https://labs.phaser.io/assets/audio/SoundEffects/pistol.wav');
+        this.load.audio('death', 'https://labs.phaser.io/assets/audio/SoundEffects/squit.wav');
+        this.load.audio('ambient', 'https://labs.phaser.io/assets/audio/tech/p2.mp3');
     }
 
     function create() {
+        // Фоновый звук Зоны
+        this.sound.add('ambient', { volume: 0.2, loop: true }).play();
+
         menuGroup = this.add.container(0, 0);
         gameGroup = this.add.container(0, 0).setVisible(false);
+        shopGroup = this.add.container(0, 0).setVisible(false);
+        leaderGroup = this.add.container(0, 0).setVisible(false);
 
+        // --- МЕНЮ ---
         const menuBg = this.add.rectangle(180, 320, 360, 640, 0x0e120e);
-        const title = this.add.text(180, 150, "STALKER\nZONE DEFENSE", { font: 'bold 32px Courier', fill: '#00ff00', align: 'center' }).setOrigin(0.5);
-        const welcome = this.add.text(180, 250, `Здравствуй, ${userName}`, { font: '18px Courier', fill: '#00ff00' }).setOrigin(0.5);
-        const playBtn = this.add.text(180, 400, "[ ИГРАТЬ ]", { font: '24px Courier', fill: '#ffff00', backgroundColor: '#003300', padding: 10 }).setOrigin(0.5).setInteractive();
+        this.add.text(180, 100, "STALKER\nDEFENSE", { font: 'bold 36px Courier', fill: '#00ff00', align: 'center' }).setOrigin(0.5).setParentContainer(menuGroup);
+        const btnStyle = { font: '22px Courier', fill: '#ffff00', backgroundColor: '#003300', padding: 10 };
+        const playBtn = this.add.text(180, 250, "[ ИГРАТЬ ]", btnStyle).setOrigin(0.5).setInteractive().setParentContainer(menuGroup);
+        const shopBtn = this.add.text(180, 330, "[ МАГАЗИН ]", btnStyle).setOrigin(0.5).setInteractive().setParentContainer(menuGroup);
+        const leaderBtn = this.add.text(180, 410, "[ РЕЙТИНГ ]", btnStyle).setOrigin(0.5).setInteractive().setParentContainer(menuGroup);
 
-        menuGroup.add([menuBg, title, welcome, playBtn]);
+        // --- МАГАЗИН ---
+        const shopBg = this.add.rectangle(180, 320, 360, 640, 0x050a05);
+        const buyDmg = this.add.text(180, 200, "УРОН АК +5\nЦена: 200", { font: '18px Courier', fill: '#fff', align: 'center' }).setOrigin(0.5).setInteractive();
+        const backFromShop = this.add.text(180, 550, "[ НАЗАД ]", { font: '20px Courier', fill: '#ff0000' }).setOrigin(0.5).setInteractive();
+        shopGroup.add([shopBg, this.add.text(180, 50, "ТОРГОВЕЦ", { font: '26px Courier', fill: '#00ff00' }).setOrigin(0.5), buyDmg, backFromShop]);
+
+        // --- РЕЙТИНГ ---
+        const leaderBg = this.add.rectangle(180, 320, 360, 640, 0x0a0a15);
+        const leaderList = this.add.text(180, 300, "Загрузка...", { font: '16px Courier', fill: '#fff', align: 'center' }).setOrigin(0.5);
+        const backFromLeader = this.add.text(180, 550, "[ НАЗАД ]", { font: '20px Courier', fill: '#ff0000' }).setOrigin(0.5).setInteractive();
+        leaderGroup.add([leaderBg, this.add.text(180, 50, "ТОП СТАЛКЕРОВ", { font: '26px Courier', fill: '#00ffff' }).setOrigin(0.5), leaderList, backFromLeader]);
 
         setupGameScene.call(this);
 
-        playBtn.on('pointerdown', () => {
-            tg.HapticFeedback.impactOccurred('medium');
-            db.ref('stalker_game/' + userId).once('value').then((snapshot) => {
-                if (snapshot.exists()) {
-                    const data = snapshot.val();
-                    money = data.money || 250;
-                    currentWave = data.currentWave || 1;
-                    moneyText.setText(`РУБЛИ: ${money}`);
-                }
-                menuGroup.setVisible(false);
-                gameGroup.setVisible(true);
+        // --- КЛИКИ МЕНЮ ---
+        playBtn.on('pointerdown', () => { 
+            loadData(() => { 
+                checkDailyBonus(); 
+                menuGroup.setVisible(false); gameGroup.setVisible(true); 
+            }); 
+        });
+
+        shopBtn.on('pointerdown', () => { 
+            loadData(() => { buyDmg.setText(`УРОН АК (ур. ${upgrades.dmg})\nЦена: ${upgrades.dmg * 200} руб.`); menuGroup.setVisible(false); shopGroup.setVisible(true); });
+        });
+
+        leaderBtn.on('pointerdown', () => {
+            menuGroup.setVisible(false); leaderGroup.setVisible(true);
+            db.ref('stalker_game').orderByChild('currentWave').limitToLast(10).once('value', snap => {
+                let text = ""; snap.forEach(child => { text = `${child.val().name || "Аноним"}: ${child.val().currentWave} волна\n` + text; });
+                leaderList.setText(text || "Зона пуста...");
             });
+        });
+
+        backFromShop.on('pointerdown', () => { shopGroup.setVisible(false); menuGroup.setVisible(true); });
+        backFromLeader.on('pointerdown', () => { leaderGroup.setVisible(false); menuGroup.setVisible(true); });
+
+        buyDmg.on('pointerdown', () => {
+            let price = upgrades.dmg * 200;
+            if (money >= price) {
+                money -= price; upgrades.dmg++; saveData();
+                buyDmg.setText(`УРОН АК (ур. ${upgrades.dmg})\nЦена: ${upgrades.dmg * 200} руб.`);
+                tg.HapticFeedback.notificationOccurred('success');
+            } else { tg.showAlert("Мало денег, сталкер!"); }
         });
     }
 
+    // --- ФУНКЦИИ FIREBASE ---
+    function saveData() { db.ref('stalker_game/' + userId).update({ money: money, currentWave: currentWave, upgrades: upgrades, name: userName }); }
+    function loadData(cb) {
+        db.ref('stalker_game/' + userId).once('value').then(snap => {
+            if (snap.exists()) {
+                const d = snap.val(); money = d.money || 250; currentWave = d.currentWave || 1; upgrades = d.upgrades || { dmg: 1, hp: 1 };
+                moneyText.setText(`РУБЛИ: ${money}`);
+            }
+            cb();
+        });
+    }
+    function checkDailyBonus() {
+        db.ref('stalker_game/' + userId).once('value').then(snap => {
+            const last = snap.val()?.lastBonusDate ? new Date(snap.val().lastBonusDate) : null;
+            if (!last || (new Date() - last) > 86400000) {
+                money += 100; moneyText.setText(`РУБЛИ: ${money}`);
+                db.ref('stalker_game/' + userId).update({ money: money, lastBonusDate: new Date().toISOString() });
+                tg.showAlert(`🎁 Ежедневная награда!\nСидорович прислал 100 рублей.`); tg.HapticFeedback.notificationOccurred('success');
+            }
+        });
+    }
+
+    // --- ИГРОВАЯ СЦЕНА ---
     function setupGameScene() {
         const scene = this;
         const ground = scene.add.tileSprite(180, 320, 360, 640, 'ground').setAlpha(0.4);
+        path = scene.add.path(40, 0).lineTo(320, 120).lineTo(40, 280).lineTo(320, 440).lineTo(180, 640);
+        let g = scene.add.graphics().lineStyle(35, 0x111111, 0.7); path.draw(g);
+
+        towers = scene.add.group(); enemies = scene.add.group(); bullets = scene.physics.add.group();
+        moneyText = scene.add.text(10, 10, `РУБЛИ: ${money}`, { font: 'bold 16px Courier', fill: '#00ff00', backgroundColor: '#000' });
+        livesText = scene.add.text(240, 10, `ЖИЗНИ: ${lives}`, { font: 'bold 16px Courier', fill: '#ff0000', backgroundColor: '#000' });
         
-        path = scene.add.path(40, 0);
-        path.lineTo(320, 120); path.lineTo(40, 280); path.lineTo(320, 440); path.lineTo(180, 640);
-        
-        let graphics = scene.add.graphics().lineStyle(35, 0x111111, 0.7);
-        path.draw(graphics);
+        startBtn = scene.add.text(180, 500, "[ В БОЙ ]", { font: '20px Courier', fill: '#00ff00', backgroundColor: '#000' }).setOrigin(0.5).setInteractive();
+        startBtn.on('pointerdown', () => { if(!isWaveActive) { startWave.call(scene); startBtn.setVisible(false); } });
 
-        towers = scene.add.group();
-        enemies = scene.add.group();
-        bullets = scene.physics.add.group();
+        // ПАНЕЛЬ СТРОИТЕЛЬСТВА (3 БАШНИ)
+        const uiBg = scene.add.graphics().fillStyle(0x051505, 0.9).fillRect(0, 560, 360, 80);
+        const btnAK = scene.add.text(15, 580, 'АК\n50', { font: '14px Courier', fill: '#ffff00', align: 'center' }).setInteractive();
+        const btnEMI = scene.add.text(110, 580, 'ЭМИ(Лёд)\n100', { font: '14px Courier', fill: '#00ffff', align: 'center' }).setInteractive();
+        const btnSVD = scene.add.text(250, 580, 'СВД\n150', { font: '14px Courier', fill: '#00ff00', align: 'center' }).setInteractive();
 
-        moneyText = scene.add.text(15, 15, `РУБЛИ: ${money}`, { font: 'bold 16px Courier', fill: '#00ff00' });
-        livesText = scene.add.text(240, 15, `ЖИЗНИ: ${lives}`, { font: 'bold 16px Courier', fill: '#ff0000' });
-        
-        startBtn = scene.add.text(180, 520, "[ В БОЙ ]", { font: '20px Courier', fill: '#00ff00', backgroundColor: '#000' }).setOrigin(0.5).setInteractive();
-        
-        startBtn.on('pointerdown', () => { 
-            if(!isWaveActive) { startWave.call(scene); startBtn.setVisible(false); } 
-        });
+        btnAK.on('pointerdown', () => { selectedTowerType = 'ak'; btnAK.setStyle({fill:'#ffff00'}); btnEMI.setStyle({fill:'#00ffff'}); btnSVD.setStyle({fill:'#00ff00'}); });
+        btnEMI.on('pointerdown', () => { selectedTowerType = 'emi'; btnEMI.setStyle({fill:'#ffff00'}); btnAK.setStyle({fill:'#00ff00'}); btnSVD.setStyle({fill:'#00ff00'}); });
+        btnSVD.on('pointerdown', () => { selectedTowerType = 'svd'; btnSVD.setStyle({fill:'#ffff00'}); btnAK.setStyle({fill:'#00ff00'}); btnEMI.setStyle({fill:'#00ffff'}); });
 
-        const btnAK = scene.add.text(25, 580, ' [АК-74] ', { font: '18px Courier', fill: '#ffff00', backgroundColor: '#002200' }).setInteractive();
-        const btnSVD = scene.add.text(190, 580, '  [СВД]  ', { font: '18px Courier', fill: '#00ff00', backgroundColor: '#002200' }).setInteractive();
-
-        btnAK.on('pointerdown', () => { selectedTowerType = 'ak'; btnAK.setStyle({fill:'#ffff00'}); btnSVD.setStyle({fill:'#00ff00'}); });
-        btnSVD.on('pointerdown', () => { selectedTowerType = 'svd'; btnSVD.setStyle({fill:'#ffff00'}); btnAK.setStyle({fill:'#00ff00'}); });
-
-        gameGroup.add([ground, graphics, moneyText, livesText, startBtn, btnAK, btnSVD]);
+        gameGroup.add([ground, g, moneyText, livesText, startBtn, uiBg, btnAK, btnEMI, btnSVD]);
 
         scene.input.on('pointerdown', (p) => {
-            if (p.y > 550 || !gameGroup.visible) return;
-            let cost = selectedTowerType === 'ak' ? 50 : 150;
+            if (p.y > 560 || !gameGroup.visible) return;
+            let cost = selectedTowerType === 'ak' ? 50 : (selectedTowerType === 'emi' ? 100 : 150);
             if (money >= cost) {
                 let x = Math.floor(p.x/40)*40+20, y = Math.floor(p.y/40)*40+20;
-                const t = scene.add.sprite(x, y, selectedTowerType === 'ak' ? 'tower_ak' : 'tower_svd');
-                t.setScale(selectedTowerType === 'ak' ? 0.6 : 1); t.type = selectedTowerType; t.lastFire = 0;
-                towers.add(t); 
-                money -= cost; 
-                moneyText.setText(`РУБЛИ: ${money}`);
+                let spr = selectedTowerType === 'ak' ? 'tower_ak' : (selectedTowerType === 'emi' ? 'tower_emi' : 'tower_svd');
+                const t = scene.add.sprite(x, y, spr).setScale(0.6);
+                t.type = selectedTowerType; t.lastFire = 0; towers.add(t);
+                money -= cost; moneyText.setText(`РУБЛИ: ${money}`);
                 tg.HapticFeedback.selectionChanged();
             }
         });
 
-        // ИСПРАВЛЕННОЕ СТОЛКНОВЕНИЕ
-        scene.physics.add.overlap(bullets, enemies, (bullet, enemy) => {
-            bullet.destroy();
-            enemy.hp -= bullet.damage;
-            if (enemy.hp <= 0) {
-                enemy.destroy();
-                money += 15; // Деньги зачисляются сразу
-                moneyText.setText(`РУБЛИ: ${money}`);
+        // ЛОГИКА УРОНА И ЗАМЕДЛЕНИЯ
+        scene.physics.add.overlap(bullets, enemies, (b, e) => {
+            if (b.type === 'emi' && !e.isSlowed) {
+                e.isSlowed = true;
+                e.pathTween.timeScale = 0.5; // Замедляем движение в 2 раза
+                e.setTint(0x00ffff); // Красим в синий
+                scene.time.delayedCall(2500, () => { if(e && e.active) { e.isSlowed = false; e.pathTween.timeScale = 1.0; e.clearTint(); } });
+            } else {
+                e.hp -= b.damage;
+                scene.add.particles(e.x, e.y, 'particle', { speed: 100, scale: { start: 0.2, end: 0 }, lifespan: 200, maxParticles: 5 });
+            }
+            b.destroy(); 
+            if (e.hp <= 0) {
+                e.destroy(); money += 15; moneyText.setText(`РУБЛИ: ${money}`);
+                scene.sound.play('death', { volume: 0.4 }); tg.HapticFeedback.impactOccurred('light');
             }
         });
     }
 
     function startWave() {
-        const scene = this;
-        isWaveActive = true;
-        let spawned = 0, total = 5 + currentWave * 2;
+        const scene = this; isWaveActive = true;
+        let spawned = 0, total = 5 + currentWave * 3;
         const timer = scene.time.addEvent({
-            delay: 1500,
+            delay: 1200,
             callback: () => {
-                let enemy = scene.add.follower(path, 0, 0, 'enemy_dog').setScale(0.5);
-                enemy.hp = 30 + currentWave * 15;
-                scene.physics.add.existing(enemy);
-                enemy.startFollow({ duration: 10000, onComplete: () => {
-                    if (enemy.active) { 
-                        lives--; 
-                        livesText.setText(`ЖИЗНИ: ${lives}`); 
-                        tg.HapticFeedback.notificationOccurred('error'); 
-                        enemy.destroy(); 
-                    }
+                let type = Phaser.Math.RND.pick(['dog', 'bloodsucker', 'giant']);
+                let e = scene.add.follower(path, 0, 0, 'enemy_' + type).setScale(0.6);
+                
+                // РАЗНЫЕ ХАРАКТЕРИСТИКИ ВРАГОВ
+                if (type === 'dog') { e.hp = 30 + currentWave * 10; e.speed = 10000; } 
+                else if (type === 'bloodsucker') { e.hp = 20 + currentWave * 5; e.speed = 6000; e.setAlpha(0.7); } // Быстрый и прозрачный
+                else { e.hp = 120 + currentWave * 20; e.speed = 18000; e.setScale(0.9); } // Медленный танк
+
+                scene.physics.add.existing(e);
+                e.startFollow({ duration: e.speed, onComplete: () => {
+                    if (e.active) { lives--; livesText.setText(`ЖИЗНИ: ${lives}`); tg.HapticFeedback.notificationOccurred('error'); e.destroy(); }
                 }});
-                enemies.add(enemy); spawned++;
+                enemies.add(e); spawned++;
                 if(spawned >= total) { 
-                    timer.remove(); 
-                    scene.time.addEvent({
-                        delay: 2000,
-                        callback: () => {
-                            if (enemies.countActive() === 0) {
-                                isWaveActive = false; 
-                                startBtn.setVisible(true); 
-                                currentWave++; 
-                                db.ref('stalker_game/' + userId).set({ money: money, currentWave: currentWave });
-                            }
-                        },
-                        loop: true
-                    });
+                    timer.remove();
+                    scene.time.addEvent({ delay: 2000, callback: () => {
+                        if (enemies.countActive() === 0) { isWaveActive = false; startBtn.setVisible(true); currentWave++; saveData(); }
+                    }, loop: true });
                 }
-            },
-            loop: true
+            }, loop: true
         });
     }
 
     function update() {
         if (!gameGroup.visible) return;
         towers.getChildren().forEach(tower => {
-            let range = tower.type === 'ak' ? 140 : 280;
-            let damage = tower.type === 'ak' ? 10 : 45;
-            let rate = tower.type === 'ak' ? 700 : 2200;
+            // Характеристики башен
+            let damage = tower.type === 'ak' ? (10 + upgrades.dmg * 5) : (tower.type === 'svd' ? 50 : 0);
+            let range = tower.type === 'ak' ? 140 : (tower.type === 'svd' ? 300 : 120);
+            let rate = tower.type === 'ak' ? 700 : (tower.type === 'svd' ? 2500 : 1500);
+
             let target = enemies.getChildren().find(e => Phaser.Math.Distance.Between(tower.x, tower.y, e.x, e.y) < range);
             if (target && this.time.now > tower.lastFire) {
-                let bullet = this.physics.add.sprite(tower.x, tower.y, 'bullet').setScale(0.5);
-                bullet.damage = damage; 
-                this.physics.moveToObject(bullet, target, 500);
-                bullets.add(bullet); 
-                tower.lastFire = this.time.now + rate;
+                let b = this.physics.add.sprite(tower.x, tower.y, 'bullet').setScale(tower.type === 'svd' ? 0.8 : 0.4);
+                b.damage = damage; b.type = tower.type; 
+                if(tower.type === 'emi') b.setTint(0x00ffff); // Синяя пуля у ЭМИ
+                
+                this.physics.moveToObject(b, target, 500);
+                bullets.add(b); tower.lastFire = this.time.now + rate;
+                this.sound.play('shot', { volume: 0.2 });
             }
         });
     }
