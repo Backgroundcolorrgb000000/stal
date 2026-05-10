@@ -35,7 +35,7 @@
     let upgrades = { dmg: 1, hp: 1 };
     let selectedTowerType = 'ak', isWaveActive = false;
     let moneyText, livesText, menuGroup, gameGroup, shopGroup, leaderGroup;
-    let towers, enemies, bullets, path, startBtn;
+    let towers, enemies, bullets, path, startBtn, bgMusic;
 
     const config = {
         type: Phaser.AUTO,
@@ -48,15 +48,15 @@
     const game = new Phaser.Game(config);
 
     function preload() {
-        // === ВИЗУАЛ (Заменяй ссылки здесь на свои картинки) ===
+        // === ВИЗУАЛ ===
         this.load.image('ground', 'https://labs.phaser.io/assets/textures/mud.png');
         
         // Башни
         this.load.image('tower_ak', 'https://labs.phaser.io/assets/sprites/masked-block.png'); 
         this.load.image('tower_svd', 'https://labs.phaser.io/assets/sprites/column.png'); 
-        this.load.image('tower_emi', 'https://labs.phaser.io/assets/sprites/crate.png'); // Новая башня
+        this.load.image('tower_emi', 'https://labs.phaser.io/assets/sprites/crate.png'); 
         
-        // Враги (ВСТАВЬ ССЫЛКИ НА ПСЕВДОСОБАК И КРОВОСОСОВ СЮДА)
+        // Враги
         this.load.image('enemy_dog', 'https://labs.phaser.io/assets/sprites/space-baddie.png'); 
         this.load.image('enemy_bloodsucker', 'https://labs.phaser.io/assets/sprites/ghost.png'); 
         this.load.image('enemy_giant', 'https://labs.phaser.io/assets/sprites/mummy.png'); 
@@ -72,38 +72,47 @@
     }
 
     function create() {
-        // Фоновый звук Зоны
-        this.sound.add('ambient', { volume: 0.2, loop: true }).play();
+        // Создаем фоновую музыку, но НЕ запускаем её здесь, чтобы браузер не блокировал игру
+        bgMusic = this.sound.add('ambient', { volume: 0.2, loop: true });
 
         menuGroup = this.add.container(0, 0);
         gameGroup = this.add.container(0, 0).setVisible(false);
         shopGroup = this.add.container(0, 0).setVisible(false);
         leaderGroup = this.add.container(0, 0).setVisible(false);
 
-        // --- МЕНЮ ---
+        // --- ГЛАВНОЕ МЕНЮ (Исправлено добавление в группу) ---
         const menuBg = this.add.rectangle(180, 320, 360, 640, 0x0e120e);
-        this.add.text(180, 100, "STALKER\nDEFENSE", { font: 'bold 36px Courier', fill: '#00ff00', align: 'center' }).setOrigin(0.5).setParentContainer(menuGroup);
-        const btnStyle = { font: '22px Courier', fill: '#ffff00', backgroundColor: '#003300', padding: 10 };
-        const playBtn = this.add.text(180, 250, "[ ИГРАТЬ ]", btnStyle).setOrigin(0.5).setInteractive().setParentContainer(menuGroup);
-        const shopBtn = this.add.text(180, 330, "[ МАГАЗИН ]", btnStyle).setOrigin(0.5).setInteractive().setParentContainer(menuGroup);
-        const leaderBtn = this.add.text(180, 410, "[ РЕЙТИНГ ]", btnStyle).setOrigin(0.5).setInteractive().setParentContainer(menuGroup);
+        const titleText = this.add.text(180, 100, "STALKER\nDEFENSE", { font: 'bold 36px Courier', fill: '#00ff00', align: 'center' }).setOrigin(0.5);
+        
+        const btnStyle = { font: '22px Courier', fill: '#ffff00', backgroundColor: '#003300', padding: { x: 10, y: 10 } };
+        const playBtn = this.add.text(180, 250, "[ ИГРАТЬ ]", btnStyle).setOrigin(0.5).setInteractive();
+        const shopBtn = this.add.text(180, 330, "[ МАГАЗИН ]", btnStyle).setOrigin(0.5).setInteractive();
+        const leaderBtn = this.add.text(180, 410, "[ РЕЙТИНГ ]", btnStyle).setOrigin(0.5).setInteractive();
+
+        // Добавляем все элементы в контейнер меню правильным способом
+        menuGroup.add([menuBg, titleText, playBtn, shopBtn, leaderBtn]);
 
         // --- МАГАЗИН ---
         const shopBg = this.add.rectangle(180, 320, 360, 640, 0x050a05);
+        const shopTitleText = this.add.text(180, 50, "ТОРГОВЕЦ", { font: '26px Courier', fill: '#00ff00' }).setOrigin(0.5);
         const buyDmg = this.add.text(180, 200, "УРОН АК +5\nЦена: 200", { font: '18px Courier', fill: '#fff', align: 'center' }).setOrigin(0.5).setInteractive();
         const backFromShop = this.add.text(180, 550, "[ НАЗАД ]", { font: '20px Courier', fill: '#ff0000' }).setOrigin(0.5).setInteractive();
-        shopGroup.add([shopBg, this.add.text(180, 50, "ТОРГОВЕЦ", { font: '26px Courier', fill: '#00ff00' }).setOrigin(0.5), buyDmg, backFromShop]);
+        shopGroup.add([shopBg, shopTitleText, buyDmg, backFromShop]);
 
         // --- РЕЙТИНГ ---
         const leaderBg = this.add.rectangle(180, 320, 360, 640, 0x0a0a15);
+        const leaderTitleText = this.add.text(180, 50, "ТОП СТАЛКЕРОВ", { font: '26px Courier', fill: '#00ffff' }).setOrigin(0.5);
         const leaderList = this.add.text(180, 300, "Загрузка...", { font: '16px Courier', fill: '#fff', align: 'center' }).setOrigin(0.5);
         const backFromLeader = this.add.text(180, 550, "[ НАЗАД ]", { font: '20px Courier', fill: '#ff0000' }).setOrigin(0.5).setInteractive();
-        leaderGroup.add([leaderBg, this.add.text(180, 50, "ТОП СТАЛКЕРОВ", { font: '26px Courier', fill: '#00ffff' }).setOrigin(0.5), leaderList, backFromLeader]);
+        leaderGroup.add([leaderBg, leaderTitleText, leaderList, backFromLeader]);
 
         setupGameScene.call(this);
 
         // --- КЛИКИ МЕНЮ ---
         playBtn.on('pointerdown', () => { 
+            // Включаем музыку только по клику пользователя
+            if (!bgMusic.isPlaying) { bgMusic.play(); }
+            
             loadData(() => { 
                 checkDailyBonus(); 
                 menuGroup.setVisible(false); gameGroup.setVisible(true); 
@@ -247,7 +256,6 @@
     function update() {
         if (!gameGroup.visible) return;
         towers.getChildren().forEach(tower => {
-            // Характеристики башен
             let damage = tower.type === 'ak' ? (10 + upgrades.dmg * 5) : (tower.type === 'svd' ? 50 : 0);
             let range = tower.type === 'ak' ? 140 : (tower.type === 'svd' ? 300 : 120);
             let rate = tower.type === 'ak' ? 700 : (tower.type === 'svd' ? 2500 : 1500);
