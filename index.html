@@ -12,7 +12,6 @@
 <body>
     <div id="game"></div>
     <script>
-    // --- FIREBASE КОНФИГУРАЦИЯ ---
     const firebaseConfig = {
         apiKey: "AIzaSyBMb2Cf30QffPe3Eo8jJQkRlriMlz7yeHw",
         authDomain: "formacrm-a5ff8.firebaseapp.com",
@@ -24,37 +23,32 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.database();
 
-    // --- TELEGRAM ---
     const tg = window.Telegram.WebApp;
     tg.expand();
     const userId = tg.initDataUnsafe?.user?.id || "local_player";
     const userName = tg.initDataUnsafe?.user?.first_name || "Сталкер";
 
-    // --- ПЕРЕМЕННЫЕ ИГРЫ ---
     let money = 250, lives = 10, currentWave = 1;
     let upgrades = { dmg: 1, hp: 1 };
     let selectedTowerType = 'ak', isWaveActive = false;
     let moneyText, livesText, menuGroup, gameGroup, shopGroup, leaderGroup;
-    let towers, enemies, bullets, path, startBtn;
+    let towers, enemies, bullets, path, startBtn, bgMusic;
 
-    // ВЫКЛЮЧАЕМ АУДИО В НАСТРОЙКАХ, чтобы Telegram не блокировал движок
+    // ВЕРНУЛИ ЗВУК: Убрали audio: { noAudio: true }
     const config = {
         type: Phaser.AUTO,
         width: 360, height: 640,
         parent: 'game',
         physics: { default: 'arcade' },
-        audio: { noAudio: true }, 
         scene: { preload: preload, create: create, update: update }
     };
 
     const game = new Phaser.Game(config);
 
     function preload() {
-        // Добавляем текст загрузки, чтобы не было просто черного экрана
         let loadingText = this.add.text(180, 320, 'ЗАГРУЗКА ЗОНЫ...', { font: '20px Courier', fill: '#00ff00' }).setOrigin(0.5);
         this.load.on('complete', () => { loadingText.destroy(); });
 
-        // === ВИЗУАЛ ===
         this.load.image('ground', 'https://labs.phaser.io/assets/textures/mud.png');
         this.load.image('tower_ak', 'https://labs.phaser.io/assets/sprites/masked-block.png'); 
         this.load.image('tower_svd', 'https://labs.phaser.io/assets/sprites/column.png'); 
@@ -66,15 +60,22 @@
         
         this.load.image('bullet', 'https://labs.phaser.io/assets/sprites/bullets/bullet1.png');
         this.load.image('particle', 'https://labs.phaser.io/assets/particles/yellow.png');
+
+        // ЗВУКИ
+        this.load.audio('shot', 'https://labs.phaser.io/assets/audio/SoundEffects/pistol.wav');
+        this.load.audio('death', 'https://labs.phaser.io/assets/audio/SoundEffects/squit.wav');
+        this.load.audio('ambient', 'https://labs.phaser.io/assets/audio/tech/p2.mp3');
     }
 
     function create() {
+        // Подготавливаем музыку, но НЕ играем её пока
+        bgMusic = this.sound.add('ambient', { volume: 0.2, loop: true });
+
         menuGroup = this.add.container(0, 0);
         gameGroup = this.add.container(0, 0).setVisible(false);
         shopGroup = this.add.container(0, 0).setVisible(false);
         leaderGroup = this.add.container(0, 0).setVisible(false);
 
-        // --- ГЛАВНОЕ МЕНЮ ---
         const menuBg = this.add.rectangle(180, 320, 360, 640, 0x0e120e);
         const titleText = this.add.text(180, 100, "STALKER\nDEFENSE", { font: 'bold 36px Courier', fill: '#00ff00', align: 'center' }).setOrigin(0.5);
         
@@ -85,26 +86,24 @@
 
         menuGroup.add([menuBg, titleText, playBtn, shopBtn, leaderBtn]);
 
-        // --- МАГАЗИН ---
         const shopBg = this.add.rectangle(180, 320, 360, 640, 0x050a05);
         const shopTitleText = this.add.text(180, 50, "ТОРГОВЕЦ", { font: '26px Courier', fill: '#00ff00' }).setOrigin(0.5);
         const buyDmg = this.add.text(180, 200, "УРОН АК +5\nЦена: 200", { font: '18px Courier', fill: '#fff', align: 'center' }).setOrigin(0.5).setInteractive();
         const backFromShop = this.add.text(180, 550, "[ НАЗАД ]", { font: '20px Courier', fill: '#ff0000' }).setOrigin(0.5).setInteractive();
-        
         shopGroup.add([shopBg, shopTitleText, buyDmg, backFromShop]);
 
-        // --- РЕЙТИНГ ---
         const leaderBg = this.add.rectangle(180, 320, 360, 640, 0x0a0a15);
         const leaderTitleText = this.add.text(180, 50, "ТОП СТАЛКЕРОВ", { font: '26px Courier', fill: '#00ffff' }).setOrigin(0.5);
         const leaderList = this.add.text(180, 300, "Загрузка...", { font: '16px Courier', fill: '#fff', align: 'center' }).setOrigin(0.5);
         const backFromLeader = this.add.text(180, 550, "[ НАЗАД ]", { font: '20px Courier', fill: '#ff0000' }).setOrigin(0.5).setInteractive();
-        
         leaderGroup.add([leaderBg, leaderTitleText, leaderList, backFromLeader]);
 
         setupGameScene.call(this);
 
-        // --- ЛОГИКА МЕНЮ ---
+        // КЛИК "ИГРАТЬ" -> ЗАПУСК ЗВУКА И ИГРЫ
         playBtn.on('pointerdown', () => { 
+            if (!bgMusic.isPlaying) bgMusic.play(); // Безопасный запуск музыки
+            
             loadData(() => { 
                 checkDailyBonus(); 
                 menuGroup.setVisible(false); gameGroup.setVisible(true); 
@@ -112,10 +111,7 @@
         });
 
         shopBtn.on('pointerdown', () => { 
-            loadData(() => { 
-                buyDmg.setText(`УРОН АК (ур. ${upgrades.dmg})\nЦена: ${upgrades.dmg * 200} руб.`); 
-                menuGroup.setVisible(false); shopGroup.setVisible(true); 
-            });
+            loadData(() => { buyDmg.setText(`УРОН АК (ур. ${upgrades.dmg})\nЦена: ${upgrades.dmg * 200} руб.`); menuGroup.setVisible(false); shopGroup.setVisible(true); });
         });
 
         leaderBtn.on('pointerdown', () => {
@@ -138,12 +134,10 @@
                 if(tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
             } else { 
                 if(tg.showAlert) tg.showAlert("Мало денег, сталкер!"); 
-                else alert("Мало денег, сталкер!");
             }
         });
     }
 
-    // --- ФУНКЦИИ FIREBASE ---
     function saveData() { db.ref('stalker_game/' + userId).update({ money: money, currentWave: currentWave, upgrades: upgrades, name: userName }); }
     function loadData(cb) {
         db.ref('stalker_game/' + userId).once('value').then(snap => {
@@ -161,12 +155,10 @@
                 money += 100; moneyText.setText(`РУБЛИ: ${money}`);
                 db.ref('stalker_game/' + userId).update({ money: money, lastBonusDate: new Date().toISOString() });
                 if(tg.showAlert) tg.showAlert(`🎁 Ежедневная награда!\nСидорович прислал 100 рублей.`);
-                if(tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
             }
         });
     }
 
-    // --- ИГРОВАЯ СЦЕНА ---
     function setupGameScene() {
         const scene = this;
         const ground = scene.add.tileSprite(180, 320, 360, 640, 'ground').setAlpha(0.4);
@@ -180,7 +172,6 @@
         startBtn = scene.add.text(180, 500, "[ В БОЙ ]", { font: '20px Courier', fill: '#00ff00', backgroundColor: '#000' }).setOrigin(0.5).setInteractive();
         startBtn.on('pointerdown', () => { if(!isWaveActive) { startWave.call(scene); startBtn.setVisible(false); } });
 
-        // ПАНЕЛЬ СТРОИТЕЛЬСТВА
         const uiBg = scene.add.graphics().fillStyle(0x051505, 0.9).fillRect(0, 560, 360, 80);
         const btnAK = scene.add.text(15, 580, 'АК\n50', { font: '14px Courier', fill: '#ffff00', align: 'center' }).setInteractive();
         const btnEMI = scene.add.text(110, 580, 'ЭМИ(Лёд)\n100', { font: '14px Courier', fill: '#00ffff', align: 'center' }).setInteractive();
@@ -205,19 +196,27 @@
             }
         });
 
+        // БЕЗОПАСНАЯ ЛОГИКА УРОНА И ЗВУКОВ
         scene.physics.add.overlap(bullets, enemies, (b, e) => {
+            if (!b.active || !e.active) return; // Защита от двойных срабатываний
+
             if (b.type === 'emi' && !e.isSlowed) {
                 e.isSlowed = true;
                 if(e.pathTween) e.pathTween.timeScale = 0.5; 
                 e.setTint(0x00ffff);
                 scene.time.delayedCall(2500, () => { if(e && e.active) { e.isSlowed = false; if(e.pathTween) e.pathTween.timeScale = 1.0; e.clearTint(); } });
-            } else {
-                e.hp -= b.damage;
+            } else if (b.type !== 'emi') {
+                e.hp -= b.damage; // Урон наносится только боевыми башнями
                 scene.add.particles(e.x, e.y, 'particle', { speed: 100, scale: { start: 0.2, end: 0 }, lifespan: 200, maxParticles: 5 });
             }
+            
             b.destroy(); 
-            if (e.hp <= 0) {
-                e.destroy(); money += 15; moneyText.setText(`РУБЛИ: ${money}`);
+            
+            if (e.hp <= 0 && e.active) {
+                e.active = false; // Помечаем как мертвого, чтобы деньги не выдались дважды
+                e.destroy(); 
+                money += 15; moneyText.setText(`РУБЛИ: ${money}`);
+                scene.sound.play('death', { volume: 0.5 }); // Воспроизводим звук смерти
                 if(tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
             }
         });
@@ -270,6 +269,8 @@
                 
                 this.physics.moveToObject(b, target, 500);
                 bullets.add(b); tower.lastFire = this.time.now + rate;
+                
+                this.sound.play('shot', { volume: 0.1 }); // Воспроизводим звук выстрела
             }
         });
     }
