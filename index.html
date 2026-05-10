@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser-arcade-physics.min.js"></script>
+    <style> body { margin: 0; background: #000; overflow: hidden; } </style>
+</head>
+<body>
+    <div id="game"></div>
+    <script>
+    const tg = window.Telegram.WebApp;
+    tg.expand(); // Разворачиваем на весь экран
+
+    const config = {
+        type: Phaser.AUTO,
+        width: 360, height: 640,
+        parent: 'game',
+        physics: { default: 'arcade' },
+        scene: { preload: preload, create: create, update: update }
+    };
+
+    const game = new Phaser.Game(config);
+    let money = 250, lives = 10, currentWave = 1;
+    let selectedTowerType = 'ak', isWaveActive = false;
+    let moneyText, livesText, waveText, startBtn, menuGroup, gameGroup;
+    let towers, enemies, bullets, path;
+
+    function preload() {
+        this.load.image('ground', 'https://labs.phaser.io/assets/textures/mud.png');
+        this.load.image('tower_ak', 'https://labs.phaser.io/assets/sprites/masked-block.png'); 
+        this.load.image('tower_svd', 'https://labs.phaser.io/assets/sprites/column.png'); 
+        this.load.image('enemy_dog', 'https://labs.phaser.io/assets/sprites/clown.png'); 
+        this.load.image('bullet', 'https://labs.phaser.io/assets/sprites/bullets/bullet1.png');
+    }
+
+    function create() {
+        // Группы для переключения экранов
+        menuGroup = this.add.container(0, 0);
+        gameGroup = this.add.container(0, 0).setVisible(false);
+
+        // --- ЭКРАН МЕНЮ ---
+        const menuBg = this.add.rectangle(180, 320, 360, 640, 0x0e120e).setOrigin(0.5);
+        const title = this.add.text(180, 150, "STALKER\nZONE DEFENSE", { font: 'bold 32px Courier', fill: '#00ff00', align: 'center' }).setOrigin(0.5);
+        
+        // Приветствие по имени из Telegram
+        const userName = tg.initDataUnsafe?.user?.first_name || "Сталкер";
+        const welcomeText = this.add.text(180, 250, `Здравствуй, ${userName}`, { font: '18px Courier', fill: '#00ff00' }).setOrigin(0.5);
+
+        const playBtn = this.add.text(180, 400, "[ ИГРАТЬ ]", { font: '24px Courier', fill: '#ffff00', backgroundColor: '#003300', padding: 10 }).setOrigin(0.5).setInteractive();
+        const infoBtn = this.add.text(180, 480, "[ ОБ ИГРЕ ]", { font: '18px Courier', fill: '#00ff00' }).setOrigin(0.5).setInteractive();
+
+        menuGroup.add([menuBg, title, welcomeText, playBtn, infoBtn]);
+
+        // --- ИГРОВОЙ ПРОЦЕСС (Создаем, но прячем) ---
+        setupGameScene.call(this);
+
+        // Логика кнопок меню
+        playBtn.on('pointerdown', () => {
+            tg.HapticFeedback.impactOccurred('medium'); // Вибрация при нажатии
+            menuGroup.setVisible(false);
+            gameGroup.setVisible(true);
+        });
+
+        infoBtn.on('pointerdown', () => {
+            tg.showAlert("Защищай блокпост от мутантов Зоны. Собирай рубли, ставь вышки и выживай!");
+        });
+    }
+
+    function setupGameScene() {
+        const scene = this;
+        const ground = scene.add.tileSprite(180, 320, 360, 640, 'ground').setAlpha(0.4);
+        
+        path = scene.add.path(40, 0);
+        path.lineTo(320, 120); path.lineTo(40, 280); path.lineTo(320, 440); path.lineTo(180, 640);
+        
+        let graphics = scene.add.graphics();
+        graphics.lineStyle(35, 0x111111, 0.7); 
+        path.draw(graphics);
+
+        towers = scene.add.group();
+        enemies = scene.add.group();
+        bullets = scene.physics.add.group();
+
+        // Интерфейс ПДА
+        const uiBg = scene.add.graphics().fillStyle(0x051505, 0.85).fillRect(0, 550, 360, 90);
+        moneyText = scene.add.text(15, 15, `РУБЛИ: ${money}`, { font: 'bold 16px Courier', fill: '#00ff00' });
+        livesText = scene.add.text(240, 15, `ЖИЗНИ: ${lives}`, { font: 'bold 16px Courier', fill: '#ff0000' });
+        
+        startBtn = scene.add.text(180, 520, "[ В БОЙ ]", { font: '20px Courier', fill: '#00ff00', backgroundColor: '#000' }).setOrigin(0.5).setInteractive();
+        startBtn.on('pointerdown', () => { 
+            if(!isWaveActive) { startWave(); startBtn.setVisible(false); } 
+        });
+
+        const btnAK = scene.add.text(25, 580, ' [АК-74] ', { font: '18px Courier', fill: '#ffff00', backgroundColor: '#002200' }).setInteractive();
+        const btnSVD = scene.add.text(190, 580, '  [СВД]  ', { font: '18px Courier', fill: '#00ff00', backgroundColor: '#002200' }).setInteractive();
+
+        btnAK.on('pointerdown', () => { selectedTowerType = 'ak'; btnAK.setStyle({fill:'#ffff00'}); btnSVD.setStyle({fill:'#00ff00'}); });
+        btnSVD.on('pointerdown', () => { selectedTowerType = 'svd'; btnSVD.setStyle({fill:'#ffff00'}); btnAK.setStyle({fill:'#00ff00'}); });
+
+        gameGroup.add([ground, graphics, moneyText, livesText, startBtn, btnAK, btnSVD]);
+
+        scene.input.on('pointerdown', (p) => {
+            if (p.y > 550 || !gameGroup.visible) return;
+            let cost = selectedTowerType === 'ak' ? 50 : 150;
+            if (money >= cost) {
+                let x = Math.floor(p.x/40)*40+20, y = Math.floor(p.y/40)*40+20;
+                const t = scene.add.sprite(x, y, selectedTowerType === 'ak' ? 'tower_ak' : 'tower_svd');
+                t.setScale(selectedTowerType === 'ak' ? 0.6 : 1); t.type = selectedTowerType; t.lastFire = 0;
+                towers.add(t); money -= cost; moneyText.setText(`РУБЛИ: ${money}`);
+                tg.HapticFeedback.selectionChanged();
+            }
+        });
+
+        scene.physics.add.overlap(bullets, enemies, (b, e) => {
+            b.destroy(); e.hp -= b.damage;
+            if (e.hp <= 0) { e.destroy(); money += 15; moneyText.setText(`РУБЛИ: ${money}`); }
+        });
+    }
+
+    function startWave() {
+        isWaveActive = true;
+        let spawned = 0, total = 5 + currentWave * 2;
+        const timer = game.scene.scenes[0].time.addEvent({
+            delay: 1500,
+            callback: () => {
+                let enemy = game.scene.scenes[0].add.follower(path, 0, 0, 'enemy_dog').setScale(0.5);
+                enemy.hp = 30 + currentWave * 15;
+                game.scene.scenes[0].physics.add.existing(enemy);
+                enemy.startFollow({ duration: 10000, onComplete: () => {
+                    if (enemy.active) { 
+                        lives--; livesText.setText(`ЖИЗНИ: ${lives}`); 
+                        tg.HapticFeedback.notificationOccurred('error'); // Вибрация при уроне
+                        enemy.destroy(); 
+                    }
+                }});
+                enemies.add(enemy); spawned++;
+                if(spawned >= total) { timer.remove(); isWaveActive = false; startBtn.setVisible(true); currentWave++; }
+            },
+            loop: true
+        });
+    }
+
+    function update() {
+        if (!gameGroup.visible) return;
+        towers.getChildren().forEach(tower => {
+            let range = tower.type === 'ak' ? 140 : 280, damage = tower.type === 'ak' ? 10 : 45, rate = tower.type === 'ak' ? 700 : 2200;
+            let target = enemies.getChildren().find(e => Phaser.Math.Distance.Between(tower.x, tower.y, e.x, e.y) < range);
+            if (target && this.time.now > tower.lastFire) {
+                let bullet = this.physics.add.sprite(tower.x, tower.y, 'bullet').setScale(0.5);
+                bullet.damage = damage; this.physics.moveToObject(bullet, target, 500);
+                bullets.add(bullet); tower.lastFire = this.time.now + rate;
+            }
+        });
+    }
+    </script>
+</body>
+</html>
